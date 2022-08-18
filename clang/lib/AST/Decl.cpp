@@ -4783,6 +4783,18 @@ bool RecordDecl::mayInsertExtraPadding(bool EmitRemark) const {
     return false;
   const auto &NoSanitizeList = Context.getNoSanitizeList();
   const auto *CXXRD = dyn_cast<CXXRecordDecl>(this);
+  const auto *RD = dyn_cast<RecordDecl>(this);
+
+  printf("mayInsertExtraPadding: declaration of %s\n", getQualifiedNameAsString().c_str());
+
+  if (RD) {
+    printf("\thasFlexibleArrayMember   %s\n", RD->hasFlexibleArrayMember() ? "yes" : "no");
+    printf("\tisAnonymousStructOrUnion %s\n", RD->isAnonymousStructOrUnion() ? "yes" : "no");
+    printf("\tisRandomized %s\n", RD->isRandomized() ? "yes" : "no");
+    printf("\tisOrContainsUnion %s\n", RD->isOrContainsUnion() ? "yes" : "no");
+    return !(RD->hasFlexibleArrayMember() || RD->isRandomized() || RD->isOrContainsUnion() || RD->isAnonymousStructOrUnion());
+  }
+  
   // We may be able to relax some of these requirements.
   int ReasonToReject = -1;
   if (!CXXRD || CXXRD->isExternCContext())

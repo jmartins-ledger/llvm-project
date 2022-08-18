@@ -1317,12 +1317,83 @@ static llvm::Constant *replaceUndef(CodeGenModule &CGM, IsPattern isPattern,
   return llvm::ConstantVector::get(Values);
 }
 
+void CodeGenFunction::PoisonRecordDecl(const AutoVarEmission &emission, const VarDecl &D) {
+  
+  const QualType T = D.getType();
+  const auto *RefT = T->getAs<ReferenceType>();
+
+  if (RefT) ; // will probably ignore this
+
+  const auto* RT = T->getAs<RecordType>();
+  if (RT) {
+    const RecordDecl *RD = RT->getDecl();
+
+    if (RD->mayInsertExtraPadding()) {
+
+      ASTContext &Context = getContext();
+
+      struct SizeAndOffset {
+        uint64_t Size;
+        uint64_t Offset;
+      };
+
+      unsigned PtrSize = CGM.getDataLayout().getPointerSizeInBits();
+      const ASTRecordLayout &Info = Context.getASTRecordLayout(RD);
+
+      // Populate sizes and offsets of fields.
+      SmallVector<SizeAndOffset, 16> SSV(Info.getFieldCount());
+      for (unsigned i = 0, e = Info.getFieldCount(); i != e; ++i)
+        SSV[i].Offset =
+            Context.toCharUnitsFromBits(Info.getFieldOffset(i)).getQuantity();
+
+      size_t NumFields = 0;
+      for (const auto *Field : RD->fields()) {
+        const FieldDecl *D = Field;
+        auto FieldInfo = Context.getTypeInfoInChars(D->getType());
+        CharUnits FieldSize = FieldInfo.Width;
+        assert(NumFields < SSV.size());
+        SSV[NumFields].Size = D->isBitField() ? 0 : FieldSize.getQuantity();
+        NumFields++;
+      }
+      assert(NumFields == SSV.size());
+      if (SSV.size() <= 1) return;
+
+      // We will insert calls to __asan_* run-time functions.
+      // LLVM AddressSanitizer pass may decide to inline them later.
+      llvm::Type *Args[2] = {IntPtrTy, IntPtrTy};
+      llvm::FunctionType *FTy = llvm::FunctionType::get(CGM.VoidTy, Args, false);
+      llvm::FunctionCallee F = CGM.CreateRuntimeFunction(FTy, "__asan_poison_intra_object_redzone");
+
+      llvm::Value *ThisPtr = emission.getAllocatedAddress().getPointer();
+      ThisPtr = Builder.CreatePtrToInt(ThisPtr, IntPtrTy);
+
+      uint64_t TypeSize = Info.getDataSize().getQuantity();
+      // For each field check if it has sufficient padding,
+      // if so poison it with a call.
+      for (size_t i = 0; i < SSV.size(); i++) {
+        uint64_t AsanAlignment = 8;
+        uint64_t NextField = i == SSV.size() - 1 ? TypeSize : SSV[i + 1].Offset;
+        uint64_t PoisonSize = NextField - SSV[i].Offset - SSV[i].Size;
+        uint64_t EndOffset = SSV[i].Offset + SSV[i].Size;
+        if (PoisonSize < AsanAlignment || !SSV[i].Size ||
+            (NextField % AsanAlignment) != 0)
+          continue;
+        Builder.CreateCall(
+            F, {Builder.CreateAdd(ThisPtr, Builder.getIntN(PtrSize, EndOffset)),
+                Builder.getIntN(PtrSize, PoisonSize)});
+      }
+    }
+  }
+}
+
+
 /// EmitAutoVarDecl - Emit code and set up an entry in LocalDeclMap for a
 /// variable declaration with auto, register, or no storage class specifier.
 /// These turn into simple stack objects, or GlobalValues depending on target.
 void CodeGenFunction::EmitAutoVarDecl(const VarDecl &D) {
   AutoVarEmission emission = EmitAutoVarAlloca(D);
   EmitAutoVarInit(emission);
+  PoisonRecordDecl(emission, D);
   EmitAutoVarCleanups(emission);
 }
 

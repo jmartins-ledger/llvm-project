@@ -3044,6 +3044,9 @@ public:
   /// that it requires no code to be generated.
   bool isTrivialInitializer(const Expr *Init);
 
+  /// This function tries to poison variable declarations - ASan related
+  void PoisonRecordDecl(const AutoVarEmission &emission, const VarDecl &D);
+
   /// EmitAutoVarDecl - Emit an auto variable declaration.
   ///
   /// This function can be called with a null (unreachable) insert point.
