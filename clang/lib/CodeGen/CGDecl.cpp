@@ -239,6 +239,8 @@ static std::string getStaticDeclName(CodeGenModule &CGM, const VarDecl &D) {
 
 llvm::Constant *CodeGenModule::getOrCreateStaticVarDecl(
     const VarDecl &D, llvm::GlobalValue::LinkageTypes Linkage) {
+
+  printf("getOrCreateStaticVarDecl %s\n", D.getName().data());
   // In general, we don't always emit static var decls once before we reference
   // them. It is possible to reference them before emitting the function that
   // contains them, and it is possible to emit the containing function multiple
@@ -281,6 +283,39 @@ llvm::Constant *CodeGenModule::getOrCreateStaticVarDecl(
     setTLSMode(GV, D);
 
   setGVProperties(GV, &D);
+
+
+  const auto *RefT = Ty->getAs<ReferenceType>();
+  const auto *PtrT = Ty->getAs<PointerType>();
+
+  if (RefT) printf("getOrCreateStaticVarDecl %s its a referenceType!\n", D.getName().data()); 
+  if (PtrT) printf("getOrCreateStaticVarDecl %s its a PointerType!\n", D.getName().data());
+
+  const auto* RT = Ty->getAs<RecordType>();
+
+  if (RT) {
+    printf("getOrCreateStaticVarDecl %s its a RecordType!\n", D.getName().data());
+    RecordDecl *RD = RT->getDecl();
+
+    if (RD->mayInsertExtraPadding()) {
+
+      printf("getOrCreateStaticVarDecl %s will insert padding\n", D.getName().data());                                              
+
+      GV->setIntraObjectInstrumentation(true);
+
+      ASTContext &Context = getContext();
+      SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
+
+      RD->getRedzones(Context, &OffsetSize);
+
+      for (size_t i = 0; i < OffsetSize.size(); i++) {
+        uint16_t Offset = std::get<0>(OffsetSize[i]);
+        uint16_t PoisonSize = std::get<1>(OffsetSize[i]);
+
+        GV->addASanIntraObjectInfo(Offset, PoisonSize);
+      }
+    }
+  }
 
   // Make sure the result is of the correct type.
   LangAS ExpectedAS = Ty.getAddressSpace();
@@ -1322,7 +1357,7 @@ void CodeGenFunction::PoisonRecordDecl(const AutoVarEmission &emission, const Va
   const QualType T = D.getType();
   const auto *RefT = T->getAs<ReferenceType>();
 
-  if (RefT) ; // will probably ignore this
+  if (RefT) printf("its a reference!\n"); // will probably ignore this
 
   const auto* RT = T->getAs<RecordType>();
   if (RT) {

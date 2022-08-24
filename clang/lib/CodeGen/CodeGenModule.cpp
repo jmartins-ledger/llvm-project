@@ -4908,11 +4908,15 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
   // get the type check if is a record declaration and check if its mayInsertExtraPadding
   
   const auto *RefT = ASTTy->getAs<ReferenceType>();
+  const auto *PtrT = ASTTy->getAs<PointerType>();
 
-  if (RefT) ; // will probably ignore this
+  if (RefT) printf("%s its a referenceType!\n", D->getName().data()); 
+  if (PtrT) printf("%s its a PointerType!\n", D->getName().data());
 
   const auto* RT = ASTTy->getAs<RecordType>();
+
   if (RT) {
+    printf("%s its a RecordType!\n", D->getName().data());
     RecordDecl *RD = RT->getDecl();
 
     if (RD->mayInsertExtraPadding()) {
@@ -4926,15 +4930,9 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
 
       RD->getRedzones(Context, &OffsetSize);
 
-      // printf("CodeGenModule::EmitGlobalVarDefinition %s size = %ld\n", D->getName().data(), OffsetSize.size());                                              
-
-
       for (size_t i = 0; i < OffsetSize.size(); i++) {
         uint16_t Offset = std::get<0>(OffsetSize[i]);
         uint16_t PoisonSize = std::get<1>(OffsetSize[i]);
-
-        // printf("CodeGenModule::EmitGlobalVarDefinition %s offset = %d PoisonSize = %d\n", D->getName().data(), Offset, PoisonSize);                                              
-
 
         GV->addASanIntraObjectInfo(Offset, PoisonSize);
       }
