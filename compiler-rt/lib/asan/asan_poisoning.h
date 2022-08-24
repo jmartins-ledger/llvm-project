@@ -91,6 +91,8 @@ ALWAYS_INLINE void FastPoisonShadowPartialRightRedzone(
   }
 }
 
+void AsanPoisonOrUnpoisonIntraObjectRedzone(uptr ptr, uptr size, bool poison);
+
 // Calls __sanitizer::ReleaseMemoryPagesToOS() on
 // [MemToShadow(p), MemToShadow(p+size)].
 void FlushUnneededASanShadowMemory(uptr p, uptr size);

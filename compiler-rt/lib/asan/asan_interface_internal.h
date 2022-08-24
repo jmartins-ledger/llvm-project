@@ -44,6 +44,16 @@ extern "C" {
     int column_no;
   };
 
+  struct y {
+    __asan::u16 offset;
+    __asan::u16 size;
+  };
+
+  struct x {
+    __asan::u16 n;
+    struct y* array;
+  };
+
   // This structure describes an instrumented global variable.
   struct __asan_global {
     uptr beg;                // The address of the global.
@@ -53,10 +63,12 @@ extern "C" {
     const char *module_name; // Module name as a C string. This pointer is a
                              // unique identifier of a module.
     uptr has_dynamic_init;   // Non-zero if the global has dynamic initializer.
-    uptr windows_padding;    // TODO: Figure out how to remove this padding
+    // uptr windows_padding;    // TODO: Figure out how to remove this padding
                              // that's simply here to make the MSVC incremental
                              // linker happy...
     uptr odr_indicator;      // The address of the ODR indicator symbol.
+
+    struct x* offsetsize;
   };
 
   // These functions can be called on some platforms to find globals in the same

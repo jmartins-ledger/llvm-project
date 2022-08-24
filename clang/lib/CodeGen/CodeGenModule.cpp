@@ -4666,6 +4666,7 @@ void CodeGenModule::maybeSetTrivialComdat(const Decl &D,
 /// Pass IsTentative as true if you want to create a tentative definition.
 void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
                                             bool IsTentative) {
+  printf("CodeGenModule::EmitGlobalVarDefinition %s\n", D->getName().data());                                              
   // OpenCL global variables of sampler type are translated to function calls,
   // therefore no need to be translated.
   QualType ASTTy = D->getType();
@@ -4903,6 +4904,42 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
     EmitCXXGlobalVarDeclInitFunc(D, GV, NeedsGlobalCtor);
 
   SanitizerMD->reportGlobal(GV, *D, NeedsGlobalCtor);
+
+  // get the type check if is a record declaration and check if its mayInsertExtraPadding
+  
+  const auto *RefT = ASTTy->getAs<ReferenceType>();
+
+  if (RefT) ; // will probably ignore this
+
+  const auto* RT = ASTTy->getAs<RecordType>();
+  if (RT) {
+    RecordDecl *RD = RT->getDecl();
+
+    if (RD->mayInsertExtraPadding()) {
+
+      printf("CodeGenModule::EmitGlobalVarDefinition %s will insert padding\n", D->getName().data());                                              
+
+      GV->setIntraObjectInstrumentation(true);
+
+      ASTContext &Context = getContext();
+      SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
+
+      RD->getRedzones(Context, &OffsetSize);
+
+      // printf("CodeGenModule::EmitGlobalVarDefinition %s size = %ld\n", D->getName().data(), OffsetSize.size());                                              
+
+
+      for (size_t i = 0; i < OffsetSize.size(); i++) {
+        uint16_t Offset = std::get<0>(OffsetSize[i]);
+        uint16_t PoisonSize = std::get<1>(OffsetSize[i]);
+
+        // printf("CodeGenModule::EmitGlobalVarDefinition %s offset = %d PoisonSize = %d\n", D->getName().data(), Offset, PoisonSize);                                              
+
+
+        GV->addASanIntraObjectInfo(Offset, PoisonSize);
+      }
+    }
+  }
 
   // Emit global variable debug information.
   if (CGDebugInfo *DI = getModuleDebugInfo())

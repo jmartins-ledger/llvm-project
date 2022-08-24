@@ -4177,6 +4177,10 @@ public:
   /// commandline option.
   bool isMsStruct(const ASTContext &C) const;
 
+  // Get the intra object redzones offset and size, in case its a record 
+  // where we inserted extra padding between fields
+  void getRedzones(ASTContext &Context, SmallVector<std::pair<uint16_t, uint16_t>> *OffsetSize);
+
   /// Whether we are allowed to insert extra padding between fields.
   /// These padding are added to help AddressSanitizer detect
   /// intra-object-overflow bugs.

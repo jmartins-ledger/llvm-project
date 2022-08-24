@@ -1326,37 +1326,17 @@ void CodeGenFunction::PoisonRecordDecl(const AutoVarEmission &emission, const Va
 
   const auto* RT = T->getAs<RecordType>();
   if (RT) {
-    const RecordDecl *RD = RT->getDecl();
+    RecordDecl *RD = RT->getDecl();
 
     if (RD->mayInsertExtraPadding()) {
 
+      unsigned PtrSize = CGM.getDataLayout().getPointerSizeInBits();
+
       ASTContext &Context = getContext();
 
-      struct SizeAndOffset {
-        uint64_t Size;
-        uint64_t Offset;
-      };
+      SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
 
-      unsigned PtrSize = CGM.getDataLayout().getPointerSizeInBits();
-      const ASTRecordLayout &Info = Context.getASTRecordLayout(RD);
-
-      // Populate sizes and offsets of fields.
-      SmallVector<SizeAndOffset, 16> SSV(Info.getFieldCount());
-      for (unsigned i = 0, e = Info.getFieldCount(); i != e; ++i)
-        SSV[i].Offset =
-            Context.toCharUnitsFromBits(Info.getFieldOffset(i)).getQuantity();
-
-      size_t NumFields = 0;
-      for (const auto *Field : RD->fields()) {
-        const FieldDecl *D = Field;
-        auto FieldInfo = Context.getTypeInfoInChars(D->getType());
-        CharUnits FieldSize = FieldInfo.Width;
-        assert(NumFields < SSV.size());
-        SSV[NumFields].Size = D->isBitField() ? 0 : FieldSize.getQuantity();
-        NumFields++;
-      }
-      assert(NumFields == SSV.size());
-      if (SSV.size() <= 1) return;
+      RD->getRedzones(Context, &OffsetSize);
 
       // We will insert calls to __asan_* run-time functions.
       // LLVM AddressSanitizer pass may decide to inline them later.
@@ -1367,19 +1347,13 @@ void CodeGenFunction::PoisonRecordDecl(const AutoVarEmission &emission, const Va
       llvm::Value *ThisPtr = emission.getAllocatedAddress().getPointer();
       ThisPtr = Builder.CreatePtrToInt(ThisPtr, IntPtrTy);
 
-      uint64_t TypeSize = Info.getDataSize().getQuantity();
-      // For each field check if it has sufficient padding,
-      // if so poison it with a call.
-      for (size_t i = 0; i < SSV.size(); i++) {
-        uint64_t AsanAlignment = 8;
-        uint64_t NextField = i == SSV.size() - 1 ? TypeSize : SSV[i + 1].Offset;
-        uint64_t PoisonSize = NextField - SSV[i].Offset - SSV[i].Size;
-        uint64_t EndOffset = SSV[i].Offset + SSV[i].Size;
-        if (PoisonSize < AsanAlignment || !SSV[i].Size ||
-            (NextField % AsanAlignment) != 0)
-          continue;
+      for (size_t i = 0; i < OffsetSize.size(); i++) {
+        uint16_t Offset, PoisonSize; 
+        
+        Offset = std::get<0>(OffsetSize[i]);
+        PoisonSize = std::get<1>(OffsetSize[i]);
         Builder.CreateCall(
-            F, {Builder.CreateAdd(ThisPtr, Builder.getIntN(PtrSize, EndOffset)),
+            F, {Builder.CreateAdd(ThisPtr, Builder.getIntN(PtrSize, Offset)),
                 Builder.getIntN(PtrSize, PoisonSize)});
       }
     }

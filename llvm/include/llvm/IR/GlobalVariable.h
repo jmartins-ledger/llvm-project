@@ -39,7 +39,15 @@ class DIGlobalVariableExpression;
 class GlobalVariable : public GlobalObject, public ilist_node<GlobalVariable> {
   friend class SymbolTableListTraits<GlobalVariable>;
 
+  struct IntraObject {
+    uint16_t offset;
+    uint16_t size;
+  };
+
+
   AttributeSet Attrs;
+  SmallVector<struct IntraObject> ASanIntraObject;
+  bool isIntraObjectInstrumentationAppliable: 1;              // Should ASan apply intra-object overflow detection mechanisms?
   bool isConstantGlobal : 1;                   // Is this a global constant?
   bool isExternallyInitializedConstant : 1;    // Is this a global whose value
                                                // can change from its initial
@@ -52,7 +60,7 @@ public:
   GlobalVariable(Type *Ty, bool isConstant, LinkageTypes Linkage,
                  Constant *Initializer = nullptr, const Twine &Name = "",
                  ThreadLocalMode = NotThreadLocal, unsigned AddressSpace = 0,
-                 bool isExternallyInitialized = false);
+                 bool isExternallyInitialized = false, bool ASanInstrument = false);
   /// GlobalVariable ctor - This creates a global and inserts it before the
   /// specified other global.
   GlobalVariable(Module &M, Type *Ty, bool isConstant, LinkageTypes Linkage,
@@ -60,7 +68,7 @@ public:
                  GlobalVariable *InsertBefore = nullptr,
                  ThreadLocalMode = NotThreadLocal,
                  Optional<unsigned> AddressSpace = None,
-                 bool isExternallyInitialized = false);
+                 bool isExternallyInitialized = false, bool ASanInstrument = false);
   GlobalVariable(const GlobalVariable &) = delete;
   GlobalVariable &operator=(const GlobalVariable &) = delete;
 
@@ -236,6 +244,34 @@ public:
   /// Set attribute list for this global
   void setAttributes(AttributeSet A) {
     Attrs = A;
+  }
+
+  void setIntraObjectInstrumentation(bool applyInstrumentation) {
+    isIntraObjectInstrumentationAppliable = applyInstrumentation;
+  }
+
+  bool getIntraObjectInstrumentation() const {
+    return isIntraObjectInstrumentationAppliable;
+  }
+
+  void setASanIntraObjectInfo(SmallVector<struct IntraObject> intraObject) {
+    ASanIntraObject = intraObject;
+  }
+
+  SmallVector<struct IntraObject> getASanIntraObjectInfo() const {
+    return ASanIntraObject;
+  }
+
+  void addASanIntraObjectInfo(uint16_t offset, uint16_t size) {
+    ASanIntraObject.push_back({offset, size});
+  }
+
+  size_t getASanIntraObjectSize() const {
+    return ASanIntraObject.size();
+  }
+
+  std::pair<uint16_t, uint16_t> get_i_ASanIntraObjectInfo(unsigned index) {
+    return std::make_pair(ASanIntraObject[index].offset, ASanIntraObject[index].size);
   }
 
   /// Check if section name is present

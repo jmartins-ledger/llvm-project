@@ -405,12 +405,14 @@ bool GlobalValue::canBeOmittedFromSymbolTable() const {
 GlobalVariable::GlobalVariable(Type *Ty, bool constant, LinkageTypes Link,
                                Constant *InitVal, const Twine &Name,
                                ThreadLocalMode TLMode, unsigned AddressSpace,
-                               bool isExternallyInitialized)
+                               bool isExternallyInitialized,
+                               bool ASanInstrument)
     : GlobalObject(Ty, Value::GlobalVariableVal,
                    OperandTraits<GlobalVariable>::op_begin(this),
                    InitVal != nullptr, Link, Name, AddressSpace),
       isConstantGlobal(constant),
-      isExternallyInitializedConstant(isExternallyInitialized) {
+      isExternallyInitializedConstant(isExternallyInitialized),
+      isIntraObjectInstrumentationAppliable(ASanInstrument) {
   assert(!Ty->isFunctionTy() && PointerType::isValidElementType(Ty) &&
          "invalid type for global variable");
   setThreadLocalMode(TLMode);
@@ -426,7 +428,8 @@ GlobalVariable::GlobalVariable(Module &M, Type *Ty, bool constant,
                                const Twine &Name, GlobalVariable *Before,
                                ThreadLocalMode TLMode,
                                Optional<unsigned> AddressSpace,
-                               bool isExternallyInitialized)
+                               bool isExternallyInitialized,
+                               bool ASanInstrument)
     : GlobalObject(Ty, Value::GlobalVariableVal,
                    OperandTraits<GlobalVariable>::op_begin(this),
                    InitVal != nullptr, Link, Name,
@@ -434,7 +437,8 @@ GlobalVariable::GlobalVariable(Module &M, Type *Ty, bool constant,
                        ? *AddressSpace
                        : M.getDataLayout().getDefaultGlobalsAddressSpace()),
       isConstantGlobal(constant),
-      isExternallyInitializedConstant(isExternallyInitialized) {
+      isExternallyInitializedConstant(isExternallyInitialized),
+      isIntraObjectInstrumentationAppliable(ASanInstrument) {
   assert(!Ty->isFunctionTy() && PointerType::isValidElementType(Ty) &&
          "invalid type for global variable");
   setThreadLocalMode(TLMode);
@@ -485,6 +489,8 @@ void GlobalVariable::copyAttributesFrom(const GlobalVariable *Src) {
   GlobalObject::copyAttributesFrom(Src);
   setExternallyInitialized(Src->isExternallyInitialized());
   setAttributes(Src->getAttributes());
+  setIntraObjectInstrumentation(Src->getIntraObjectInstrumentation());
+  setASanIntraObjectInfo(Src->getASanIntraObjectInfo());
 }
 
 void GlobalVariable::dropAllReferences() {

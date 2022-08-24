@@ -2224,8 +2224,9 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
   //   const char *name;
   //   const char *module_name;
   //   size_t has_dynamic_init;
-  //   size_t padding_for_windows_msvc_incremental_link;
   //   size_t odr_indicator;
+  // struct OffsetSize* offsetsize;
+
   // We initialize an array of such structures and pass it to a run-time call.
   StructType *GlobalStructTy =
       StructType::get(IntptrTy, IntptrTy, IntptrTy, IntptrTy, IntptrTy,
@@ -2333,6 +2334,54 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
       ODRIndicator = ODRIndicatorSym;
     }
 
+
+    GlobalVariable* intraObjectInitializer = nullptr;
+    printf("NewGlobal->getIntraObjectInstrumentation() %d\n", NewGlobal->getIntraObjectInstrumentation());
+    if (NewGlobal->getIntraObjectInstrumentation()) {
+
+      size_t elemnts = G->getASanIntraObjectSize();
+
+      printf("elemnts %ld\n", elemnts);
+
+      StructType *offset_sizeTy = StructType::get(IRB.getInt16Ty(), IRB.getInt16Ty());
+      ArrayType *ArrayElements = ArrayType::get(offset_sizeTy, elemnts);
+      StructType *intraObjectInfoTy = StructType::get(IRB.getInt16Ty(), ArrayElements);
+      Type* Int16Ty = Type::getInt16Ty(*C);
+
+      SmallVector<Constant*> array_initializers(elemnts);
+
+      for (size_t x = 0; x < elemnts; x++) {
+        uint16_t Offset, PoisonSize;
+        std::pair<uint16_t, uint16_t> OffsetSize = NewGlobal->get_i_ASanIntraObjectInfo(x);
+
+        Offset = std::get<0>(OffsetSize);
+        PoisonSize = std::get<1>(OffsetSize); 
+        Constant *OffsetSizeInitializer = ConstantStruct::get(offset_sizeTy, 
+                                              ConstantInt::get(Int16Ty, Offset),
+                                              ConstantInt::get(Int16Ty, PoisonSize));
+
+        printf("%s\n", NewGlobal->getName().data());
+        printf("   offset       %d\n", Offset);
+        printf("   poison size %d\n", PoisonSize);
+        array_initializers[x] = OffsetSizeInitializer;
+      }
+
+      assert(elemnts < 0xffff);
+
+      Constant* intraObjectInfoInitializer = ConstantStruct::get(intraObjectInfoTy,
+                                            ConstantInt::get(Int16Ty, (uint16_t) elemnts),
+                                            ConstantArray::get(ArrayElements, array_initializers));
+
+
+      // now we need to create a global variable for this initializer and then add this to the actually initializer
+      intraObjectInitializer = new GlobalVariable(M, intraObjectInfoInitializer->getType(),
+                                                  true, GlobalValue::PrivateLinkage,
+                                                  intraObjectInfoInitializer, kAsanGenPrefix);
+    }
+
+
+    Constant* intraObject = intraObjectInitializer ? ConstantExpr::getPointerCast(intraObjectInitializer, IntptrTy) : Constant::getNullValue(IntptrTy);
+
     Constant *Initializer = ConstantStruct::get(
         GlobalStructTy,
         ConstantExpr::getPointerCast(InstrumentedGlobal, IntptrTy),
@@ -2341,8 +2390,8 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
         ConstantExpr::getPointerCast(Name, IntptrTy),
         ConstantExpr::getPointerCast(ModuleName, IntptrTy),
         ConstantInt::get(IntptrTy, MD.IsDynInit),
-        Constant::getNullValue(IntptrTy),
-        ConstantExpr::getPointerCast(ODRIndicator, IntptrTy));
+        ConstantExpr::getPointerCast(ODRIndicator, IntptrTy),
+        intraObject);
 
     if (ClInitializers && MD.IsDynInit)
       HasDynamicallyInitializedGlobals = true;
@@ -2350,6 +2399,7 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
     LLVM_DEBUG(dbgs() << "NEW GLOBAL: " << *NewGlobal << "\n");
 
     Initializers[i] = Initializer;
+    printf("InstrumentGlobals: %s\n", NewGlobal->getName().data());
   }
 
   // Add instrumented globals to llvm.compiler.used list to avoid LTO from

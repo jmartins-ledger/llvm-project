@@ -61,6 +61,7 @@ ALWAYS_INLINE void PoisonShadowForGlobal(const Global *g, u8 value) {
 }
 
 ALWAYS_INLINE void PoisonRedZones(const Global &g) {
+  Printf("PoisonRedZones: %s\n", g.name);
   uptr aligned_size = RoundUpTo(g.size, ASAN_SHADOW_GRANULARITY);
   FastPoisonShadow(g.beg + aligned_size, g.size_with_redzone - aligned_size,
                    kAsanGlobalRedzoneMagic);
@@ -69,6 +70,32 @@ ALWAYS_INLINE void PoisonRedZones(const Global &g) {
         g.beg + RoundDownTo(g.size, ASAN_SHADOW_GRANULARITY),
         g.size % ASAN_SHADOW_GRANULARITY, ASAN_SHADOW_GRANULARITY,
         kAsanGlobalRedzoneMagic);
+  }
+
+  struct y {
+    u16 offset;
+    u16 size;
+  };
+
+  struct x {
+    u16 n;
+    struct y array[];
+  };
+
+  // intra object poison
+  if (g.offsetsize) {
+
+    struct x* info = (struct x*)g.offsetsize;
+    u16 n = info->n;
+    for(u16 i = 0; i < n; i++) {
+      u16 Offset, PoisonSize;
+  
+      Offset = info->array[i].offset;
+      PoisonSize = info->array[i].size;
+
+      uptr addr = g.beg + Offset;
+      AsanPoisonOrUnpoisonIntraObjectRedzone(addr, (uptr)PoisonSize, true);
+    }
   }
 }
 
@@ -81,6 +108,7 @@ static bool IsAddressNearGlobal(uptr addr, const __asan_global &g) {
 }
 
 static void ReportGlobal(const Global &g, const char *prefix) {
+  Printf("ReportGlobal: %s\n", g.name);
   Report(
       "%s Global[%p]: beg=%p size=%zu/%zu name=%s module=%s dyn_init=%zu "
       "odr_indicator=%p\n",
@@ -195,11 +223,14 @@ static inline bool UseODRIndicator(const Global *g) {
 // This function may be called more than once for every global
 // so we store the globals in a map.
 static void RegisterGlobal(const Global *g) {
+  Printf("RegisterGlobal: %s\n", g->name);
   CHECK(asan_inited);
   if (flags()->report_globals >= 2)
     ReportGlobal(*g, "Added");
   CHECK(flags()->report_globals);
   CHECK(AddrIsInMem(g->beg));
+  CHECK(AddrIsInMem((uptr)(g->offsetsize)));
+  // TODO should do CHECK also on the array?
   if (!AddrIsAlignedByGranularity(g->beg)) {
     Report("The following global variable is not properly aligned.\n");
     Report("This may happen if another global with the same name\n");
@@ -352,6 +383,9 @@ void __asan_unregister_elf_globals(uptr *flag, void *start, void *stop) {
 
 // Register an array of globals.
 void __asan_register_globals(__asan_global *globals, uptr n) {
+  for (uptr i = 0; i < n; i++) {
+    Printf("__asan_register_globals: %s\n", globals[i].name);
+  }
   if (!flags()->report_globals) return;
   GET_STACK_TRACE_MALLOC;
   u32 stack_id = StackDepotPut(stack);

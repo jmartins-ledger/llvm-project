@@ -4775,6 +4775,53 @@ void RecordDecl::LoadFieldsFromExternalStorage() const {
                                                  /*FieldsAlreadyLoaded=*/false);
 }
 
+void RecordDecl::getRedzones(ASTContext &Context, SmallVector<std::pair<uint16_t, uint16_t>> *OffsetSize) {
+    
+    struct SizeAndOffset {
+      uint64_t Size;
+      uint64_t Offset;
+    };
+
+    const ASTRecordLayout &Info = Context.getASTRecordLayout(this);
+
+    // Populate sizes and offsets of fields.
+    SmallVector<SizeAndOffset, 16> SSV(Info.getFieldCount());
+    for (unsigned i = 0, e = Info.getFieldCount(); i != e; ++i)
+      SSV[i].Offset =
+          Context.toCharUnitsFromBits(Info.getFieldOffset(i)).getQuantity();
+
+    size_t NumFields = 0;
+    for (const auto *Field : this->fields()) {
+      const FieldDecl *D = Field;
+      auto FieldInfo = Context.getTypeInfoInChars(D->getType());
+      CharUnits FieldSize = FieldInfo.Width;
+      assert(NumFields < SSV.size());
+      SSV[NumFields].Size = D->isBitField() ? 0 : FieldSize.getQuantity();
+      NumFields++;
+    }
+    assert(NumFields == SSV.size());
+    if (SSV.size() <= 1) return;
+
+    uint64_t TypeSize = Info.getDataSize().getQuantity();
+    // For each field check if it has sufficient padding,
+    // if so poison it with a call.
+    for (size_t i = 0; i < SSV.size(); i++) {
+      uint64_t AsanAlignment = 8;
+      uint64_t NextField = i == SSV.size() - 1 ? TypeSize : SSV[i + 1].Offset;
+      uint64_t PoisonSize = NextField - SSV[i].Offset - SSV[i].Size;
+      uint64_t EndOffset = SSV[i].Offset + SSV[i].Size;
+      if (PoisonSize < AsanAlignment || !SSV[i].Size ||
+          (NextField % AsanAlignment) != 0)
+        continue;
+
+      assert(EndOffset <= 0xffff);
+      assert(PoisonSize <= 0xffff);
+      
+      OffsetSize->push_back(std::make_pair((uint16_t)EndOffset, (uint16_t)PoisonSize));
+    }
+}
+
+
 bool RecordDecl::mayInsertExtraPadding(bool EmitRemark) const {
   ASTContext &Context = getASTContext();
   const SanitizerMask EnabledAsanMask = Context.getLangOpts().Sanitize.Mask &
