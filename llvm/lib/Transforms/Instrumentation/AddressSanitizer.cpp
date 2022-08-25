@@ -2336,7 +2336,10 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
 
 
     GlobalVariable* intraObjectInitializer = nullptr;
-    printf("NewGlobal->getIntraObjectInstrumentation() %d\n", NewGlobal->getIntraObjectInstrumentation());
+
+    printf("InstrumentGlobals: %s has intra object instrumentation %s\n", 
+                                                  NewGlobal->getName().data(),
+                                                  NewGlobal->getIntraObjectInstrumentation() ? "true" : "false");
     if (NewGlobal->getIntraObjectInstrumentation()) {
 
       size_t elemnts = G->getASanIntraObjectSize();
@@ -2399,7 +2402,6 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
     LLVM_DEBUG(dbgs() << "NEW GLOBAL: " << *NewGlobal << "\n");
 
     Initializers[i] = Initializer;
-    printf("InstrumentGlobals: %s\n", NewGlobal->getName().data());
   }
 
   // Add instrumented globals to llvm.compiler.used list to avoid LTO from
