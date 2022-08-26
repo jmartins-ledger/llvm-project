@@ -4905,39 +4905,7 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
 
   SanitizerMD->reportGlobal(GV, *D, NeedsGlobalCtor);
 
-  // get the type check if is a record declaration and check if its mayInsertExtraPadding
-  
-  const auto *RefT = ASTTy->getAs<ReferenceType>();
-  const auto *PtrT = ASTTy->getAs<PointerType>();
-
-  if (RefT) printf("%s its a referenceType!\n", D->getName().data()); 
-  if (PtrT) printf("%s its a PointerType!\n", D->getName().data());
-
-  const auto* RT = ASTTy->getAs<RecordType>();
-
-  if (RT) {
-    printf("%s its a RecordType!\n", D->getName().data());
-    RecordDecl *RD = RT->getDecl();
-
-    if (RD->mayInsertExtraPadding()) {
-
-      printf("CodeGenModule::EmitGlobalVarDefinition %s will insert padding\n", D->getName().data());                                              
-
-      GV->setIntraObjectInstrumentation(true);
-
-      ASTContext &Context = getContext();
-      SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
-
-      RD->getRedzones(Context, &OffsetSize);
-
-      for (size_t i = 0; i < OffsetSize.size(); i++) {
-        uint16_t Offset = std::get<0>(OffsetSize[i]);
-        uint16_t PoisonSize = std::get<1>(OffsetSize[i]);
-
-        GV->addASanIntraObjectInfo(Offset, PoisonSize);
-      }
-    }
-  }
+  tryAddPoisonInfoToGV(ASTTy, GV);
 
   // Emit global variable debug information.
   if (CGDebugInfo *DI = getModuleDebugInfo())
@@ -7045,4 +7013,33 @@ void CodeGenModule::moveLazyEmissionStates(CodeGenModule *NewBuilder) {
   NewBuilder->EmittedDeferredDecls = std::move(EmittedDeferredDecls);
 
   NewBuilder->ABI->MangleCtx = std::move(ABI->MangleCtx);
+}
+
+void CodeGenModule::tryAddPoisonInfoToGV(const QualType T, llvm::GlobalVariable *GV) {
+    // if its a pointer get the derefenrece otherwise work with the original type T
+
+    const auto* RT = T->getAs<RecordType>();
+
+    if (RT) {
+      RecordDecl *RD = RT->getDecl();
+
+      if (RD->mayInsertExtraPadding()) {
+
+        printf("tryAddPoisonToGV %s will be poisoned\n", GV->getName().data());                                              
+
+        GV->setIntraObjectInstrumentation(true);
+
+        ASTContext &Context = getContext();
+        SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
+
+        RD->getRedzones(Context, &OffsetSize);
+
+        for (size_t i = 0; i < OffsetSize.size(); i++) {
+          uint16_t Offset = std::get<0>(OffsetSize[i]);
+          uint16_t PoisonSize = std::get<1>(OffsetSize[i]);
+
+          GV->addASanIntraObjectInfo(Offset, PoisonSize);
+        }
+      }
+    }
 }

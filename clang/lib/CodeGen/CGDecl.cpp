@@ -284,38 +284,7 @@ llvm::Constant *CodeGenModule::getOrCreateStaticVarDecl(
 
   setGVProperties(GV, &D);
 
-
-  const auto *RefT = Ty->getAs<ReferenceType>();
-  const auto *PtrT = Ty->getAs<PointerType>();
-
-  if (RefT) printf("getOrCreateStaticVarDecl %s its a referenceType!\n", D.getName().data()); 
-  if (PtrT) printf("getOrCreateStaticVarDecl %s its a PointerType!\n", D.getName().data());
-
-  const auto* RT = Ty->getAs<RecordType>();
-
-  if (RT) {
-    printf("getOrCreateStaticVarDecl %s its a RecordType!\n", D.getName().data());
-    RecordDecl *RD = RT->getDecl();
-
-    if (RD->mayInsertExtraPadding()) {
-
-      printf("getOrCreateStaticVarDecl %s will insert padding\n", D.getName().data());                                              
-
-      GV->setIntraObjectInstrumentation(true);
-
-      ASTContext &Context = getContext();
-      SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
-
-      RD->getRedzones(Context, &OffsetSize);
-
-      for (size_t i = 0; i < OffsetSize.size(); i++) {
-        uint16_t Offset = std::get<0>(OffsetSize[i]);
-        uint16_t PoisonSize = std::get<1>(OffsetSize[i]);
-
-        GV->addASanIntraObjectInfo(Offset, PoisonSize);
-      }
-    }
-  }
+  tryAddPoisonInfoToGV(Ty, GV);
 
   // Make sure the result is of the correct type.
   LangAS ExpectedAS = Ty.getAddressSpace();
@@ -1352,57 +1321,13 @@ static llvm::Constant *replaceUndef(CodeGenModule &CGM, IsPattern isPattern,
   return llvm::ConstantVector::get(Values);
 }
 
-void CodeGenFunction::PoisonRecordDecl(const AutoVarEmission &emission, const VarDecl &D) {
-  
-  const QualType T = D.getType();
-  const auto *RefT = T->getAs<ReferenceType>();
-
-  if (RefT) printf("its a reference!\n"); // will probably ignore this
-
-  const auto* RT = T->getAs<RecordType>();
-  if (RT) {
-    RecordDecl *RD = RT->getDecl();
-
-    if (RD->mayInsertExtraPadding()) {
-
-      unsigned PtrSize = CGM.getDataLayout().getPointerSizeInBits();
-
-      ASTContext &Context = getContext();
-
-      SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
-
-      RD->getRedzones(Context, &OffsetSize);
-
-      // We will insert calls to __asan_* run-time functions.
-      // LLVM AddressSanitizer pass may decide to inline them later.
-      llvm::Type *Args[2] = {IntPtrTy, IntPtrTy};
-      llvm::FunctionType *FTy = llvm::FunctionType::get(CGM.VoidTy, Args, false);
-      llvm::FunctionCallee F = CGM.CreateRuntimeFunction(FTy, "__asan_poison_intra_object_redzone");
-
-      llvm::Value *ThisPtr = emission.getAllocatedAddress().getPointer();
-      ThisPtr = Builder.CreatePtrToInt(ThisPtr, IntPtrTy);
-
-      for (size_t i = 0; i < OffsetSize.size(); i++) {
-        uint16_t Offset, PoisonSize; 
-        
-        Offset = std::get<0>(OffsetSize[i]);
-        PoisonSize = std::get<1>(OffsetSize[i]);
-        Builder.CreateCall(
-            F, {Builder.CreateAdd(ThisPtr, Builder.getIntN(PtrSize, Offset)),
-                Builder.getIntN(PtrSize, PoisonSize)});
-      }
-    }
-  }
-}
-
-
 /// EmitAutoVarDecl - Emit code and set up an entry in LocalDeclMap for a
 /// variable declaration with auto, register, or no storage class specifier.
 /// These turn into simple stack objects, or GlobalValues depending on target.
 void CodeGenFunction::EmitAutoVarDecl(const VarDecl &D) {
   AutoVarEmission emission = EmitAutoVarAlloca(D);
   EmitAutoVarInit(emission);
-  PoisonRecordDecl(emission, D);
+  tryIntraObjectPoison(D.getType(), emission.getAllocatedAddress().getPointer());
   EmitAutoVarCleanups(emission);
 }
 

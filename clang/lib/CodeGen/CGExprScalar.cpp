@@ -4285,53 +4285,7 @@ Value *ScalarExprEmitter::VisitBinAssign(const BinaryOperator *E) {
 
     // one possible weird situation is that we could also need to unpoison it here ...
 
-    const QualType T = LHS.getType();
-    const auto* PtrT = T->getAs<PointerType>();
-
-    if (PtrT) {
-      printf("VisitBinAssign LHS type is a pointer\n");
-      const auto DerefPtrT = PtrT->getPointeeType();
-      const auto* RT = DerefPtrT->getAs<RecordType>();
-      // is record type
-      
-      if (RT) {
-        printf("VisitBinAssign LHS type deref is a record\n");
-        RecordDecl * RD = RT->getDecl();
-        // TODO i dont really know the difference in isScalar(),isComplex(),isAggregate()
-        // 
-        if (RD->mayInsertExtraPadding()) {
-
-          unsigned PtrSize = CGF.CGM.getDataLayout().getPointerSizeInBits();
-
-          ASTContext &Context = CGF.getContext();
-
-          SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
-
-          RD->getRedzones(Context, &OffsetSize);
-
-          // We will insert calls to __asan_* run-time functions.
-          // LLVM AddressSanitizer pass may decide to inline them later.
-          llvm::Type *Args[2] = {CGF.CGM.IntPtrTy, CGF.CGM.IntPtrTy}; // will this be a problem?
-          llvm::FunctionType *FTy = llvm::FunctionType::get(CGF.CGM.VoidTy, Args, false);
-          llvm::FunctionCallee F = CGF.CGM.CreateRuntimeFunction(FTy, "__asan_poison_intra_object_redzone");
-
-          // we know the RValue is a scalar
-          llvm::Value *ThisPtr = RValue::get(RHS).getScalarVal();
-          ThisPtr = Builder.CreatePtrToInt(ThisPtr, CGF.CGM.IntPtrTy);
-
-          for (size_t i = 0; i < OffsetSize.size(); i++) {
-            uint16_t Offset, PoisonSize; 
-            
-            Offset = std::get<0>(OffsetSize[i]);
-            PoisonSize = std::get<1>(OffsetSize[i]);
-            Builder.CreateCall(
-                F, {Builder.CreateAdd(ThisPtr, Builder.getIntN(PtrSize, Offset)),
-                    Builder.getIntN(PtrSize, PoisonSize)});
-          }
-        }
-      }
-    }
-
+    CGF.tryIntraObjectPoison(LHS.getType(), RValue::get(RHS).getScalarVal());
 
     // Store the value into the LHS.  Bit-fields are handled specially
     // because the result is altered by the store, i.e., [C99 6.5.16p1]

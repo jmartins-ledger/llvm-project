@@ -2786,3 +2786,44 @@ llvm::Value *CodeGenFunction::emitBoolVecConversion(llvm::Value *SrcVec,
 
   return Builder.CreateShuffleVector(SrcVec, ShuffleMask, Name);
 }
+
+void CodeGenFunction::tryIntraObjectPoison(const QualType T, llvm::Value* MemoryAddress) {
+    // if its a pointer get the derefenrece otherwise work with the original type T
+    const auto* PtrT = T->getAs<PointerType>();
+    const auto NewT = PtrT ? PtrT->getPointeeType() : T;
+
+    const auto* RT = NewT->getAs<RecordType>();
+
+    if (RT) {
+      RecordDecl* RD = RT->getDecl();
+
+      if (RD->mayInsertExtraPadding()) {
+
+        ASTContext &Context = getContext();
+
+        unsigned PtrSize = CGM.getDataLayout().getPointerSizeInBits();
+
+        SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
+        RD->getRedzones(Context, &OffsetSize);
+
+        // Insert call to __asan_poison_intra_object_redzone run-time functions.
+        // LLVM AddressSanitizer pass may decide to inline them later.
+        llvm::Type *Args[2] = {IntPtrTy, IntPtrTy};
+        llvm::FunctionType *FTy = llvm::FunctionType::get(VoidTy, Args, false);
+        llvm::FunctionCallee F = CGM.CreateRuntimeFunction(FTy, "__asan_poison_intra_object_redzone");
+
+        llvm::Value* StartStructAddr;
+        StartStructAddr = Builder.CreatePtrToInt(MemoryAddress, IntPtrTy);
+
+        for (size_t i = 0; i < OffsetSize.size(); i++) {
+          uint16_t Offset, PoisonSize; 
+          
+          Offset = std::get<0>(OffsetSize[i]);
+          PoisonSize = std::get<1>(OffsetSize[i]);
+          Builder.CreateCall(
+              F, {Builder.CreateAdd(StartStructAddr, Builder.getIntN(PtrSize, Offset)),
+                  Builder.getIntN(PtrSize, PoisonSize)});
+        }
+      }
+    }
+}
