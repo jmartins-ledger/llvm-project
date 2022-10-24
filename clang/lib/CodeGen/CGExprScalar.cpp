@@ -4283,10 +4283,7 @@ Value *ScalarExprEmitter::VisitBinAssign(const BinaryOperator *E) {
     RHS = Visit(E->getRHS());
     LHS = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
 
-    // one possible weird situation is that we could also need to unpoison it here ...
-
-    CGF.tryIntraObjectPoison(LHS.getType(), RValue::get(RHS).getScalarVal());
-
+    CGF.tryIntraObjectPoisonOrUnpoison(LHS.getType(), RValue::get(RHS).getScalarVal(), /*AssignLHS*/ false, /*Poison*/ true, "", "VisitBinAssign RHS");
     // Store the value into the LHS.  Bit-fields are handled specially
     // because the result is altered by the store, i.e., [C99 6.5.16p1]
     // 'An assignment expression has the value of the left operand after

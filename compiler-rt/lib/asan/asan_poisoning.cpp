@@ -64,7 +64,89 @@ struct ShadowSegmentEndpoint {
   }
 };
 
+void printf_info(const char* msg, uptr ptr, uptr size, bool poison, uptr value) {
+  Printf("%s %s 0x%lx 0x%lx %d %x\n", msg, poison ? "Poison" : "Unpoison", ptr, MemToShadow(ptr), size,value);
+
+}
+
+ALWAYS_INLINE
+bool isPoisoned(u8 shadowByte) {
+  return shadowByte & 0x80;
+}
+void print_line(u8* addr, uptr size) {
+
+#define RED   "\033[1m\033[31m"
+#define GRN   "\033[1m\033[32m"
+#define YEL   "\033[1m\033[33m"
+#define BLU   "\033[1m\033[34m"
+#define MAG   "\033[1m\033[35m"
+#define RESET "\x1B[0m"
+
+  Printf("0x%lx | ", addr);
+  for (uptr i = 0; i < size; i++) {
+    if (addr[i] == 0xf1 || addr[i] == 0xfa) {
+      Printf(RED);
+    }
+
+    if (addr[i] == 0xfd) {
+      Printf(MAG);
+    }
+
+    if (addr[i] == 0xbb) {
+      Printf(YEL);
+    }
+    
+    if (addr[i] == 0xf3) {
+      Printf(GRN);
+    }
+
+    
+    Printf("%02x ", addr[i]);
+    Printf(RESET);
+  }
+  Printf("\n");
+} 
+
+void hexdump(u8* addr) {
+  uptr bytes_line = 0x10;
+
+  uptr align = (uptr) addr;
+  align = ((align + bytes_line - 1) / bytes_line) * bytes_line;
+
+  addr = (u8*) align;
+
+  u8* start = addr - 5 * bytes_line;
+  u8* end   = addr + 5 * bytes_line;
+  for (; start < end; start += bytes_line)
+    print_line(start, bytes_line);
+}
+
+
+ALWAYS_INLINE
+bool isIntraObjectRedzone(bool poison, u8 shadowByte) {
+  return isPoisoned(shadowByte) && (shadowByte == kAsanIntraObjectRedzone);
+}
+
+bool wasIntraObjectPoisoned(uptr ptr, uptr end) {
+
+  for (; ptr < end; ptr += ASAN_SHADOW_GRANULARITY) {
+    u8 shadowByte = *(u8*)MemToShadow(ptr);
+    if (isPoisoned(shadowByte) && shadowByte != kAsanIntraObjectRedzone)
+      return false;
+  }
+  return true;
+}
+
 void AsanPoisonOrUnpoisonIntraObjectRedzone(uptr ptr, uptr size, bool poison) {
+  
+  // Avoid run-time null value poisoning
+  if (ptr == 0) {
+    Printf("AsanPoisonOrUnpoisonIntraObjectRedzone: is null\n");
+    return;
+  }
+
+  hexdump((u8*)MemToShadow(ptr));
+
   uptr end = ptr + size;
   if (Verbosity()) {
     Printf("__asan_%spoison_intra_object_redzone [%p,%p) %zd\n",
@@ -75,6 +157,12 @@ void AsanPoisonOrUnpoisonIntraObjectRedzone(uptr ptr, uptr size, bool poison) {
   CHECK(size);
   CHECK_LE(size, 4096);
   CHECK(IsAligned(end, ASAN_SHADOW_GRANULARITY));
+
+  // dont unpoison if was poisoned in the mean time by someone else
+  // this will probably be unecessary since I think we will never unpoison stuff
+  if (!poison && !wasIntraObjectPoisoned(ptr, end))
+    return;
+
   if (!IsAligned(ptr, ASAN_SHADOW_GRANULARITY)) {
     *(u8 *)MemToShadow(ptr) =
         poison ? static_cast<u8>(ptr % ASAN_SHADOW_GRANULARITY) : 0;
@@ -431,6 +519,11 @@ int __sanitizer_verify_contiguous_container(const void *beg_p,
                                             const void *end_p) {
   return __sanitizer_contiguous_container_find_bad_address(beg_p, mid_p,
                                                            end_p) == nullptr;
+}
+
+extern "C" SANITIZER_INTERFACE_ATTRIBUTE
+void __asan_debug_shadow(uptr ptr) {
+  hexdump((u8*)MemToShadow(ptr));
 }
 
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE

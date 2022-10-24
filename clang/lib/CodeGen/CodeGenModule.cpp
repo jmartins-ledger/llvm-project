@@ -4666,7 +4666,6 @@ void CodeGenModule::maybeSetTrivialComdat(const Decl &D,
 /// Pass IsTentative as true if you want to create a tentative definition.
 void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
                                             bool IsTentative) {
-  printf("CodeGenModule::EmitGlobalVarDefinition %s\n", D->getName().data());                                              
   // OpenCL global variables of sampler type are translated to function calls,
   // therefore no need to be translated.
   QualType ASTTy = D->getType();
@@ -7016,7 +7015,9 @@ void CodeGenModule::moveLazyEmissionStates(CodeGenModule *NewBuilder) {
 }
 
 void CodeGenModule::tryAddPoisonInfoToGV(const QualType T, llvm::GlobalVariable *GV) {
-    // if its a pointer get the derefenrece otherwise work with the original type T
+    // cases involving pointers are like the following:
+    // struct X* x = NULL; <- dont care
+    // struct X* x = &y; <- dont care because variable y should already be poisoned
 
     const auto* RT = T->getAs<RecordType>();
 
@@ -7032,7 +7033,7 @@ void CodeGenModule::tryAddPoisonInfoToGV(const QualType T, llvm::GlobalVariable 
         ASTContext &Context = getContext();
         SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
 
-        RD->getRedzones(Context, &OffsetSize);
+        RD->getRedzones(Context, &OffsetSize, /* displacement */ 0);
 
         for (size_t i = 0; i < OffsetSize.size(); i++) {
           uint16_t Offset = std::get<0>(OffsetSize[i]);

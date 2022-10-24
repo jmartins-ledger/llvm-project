@@ -240,7 +240,6 @@ static std::string getStaticDeclName(CodeGenModule &CGM, const VarDecl &D) {
 llvm::Constant *CodeGenModule::getOrCreateStaticVarDecl(
     const VarDecl &D, llvm::GlobalValue::LinkageTypes Linkage) {
 
-  printf("getOrCreateStaticVarDecl %s\n", D.getName().data());
   // In general, we don't always emit static var decls once before we reference
   // them. It is possible to reference them before emitting the function that
   // contains them, and it is possible to emit the containing function multiple
@@ -780,6 +779,10 @@ void CodeGenFunction::EmitScalarInit(const Expr *init, const ValueDecl *D,
   Qualifiers::ObjCLifetime lifetime = lvalue.getObjCLifetime();
   if (!lifetime) {
     llvm::Value *value = EmitScalarExpr(init);
+
+    // its a variable declaration no need to unpoison LHS
+    // tryIntraObjectPoisonOrUnpoison(D->getType(), value, /*AssignLHS*/ false, true, D->getName().data(), "EmitScalarInit");
+
     if (capturedByInit)
       drillIntoBlockVariable(*this, lvalue, cast<VarDecl>(D));
     EmitNullabilityCheck(lvalue, value, init->getExprLoc());
@@ -1327,7 +1330,11 @@ static llvm::Constant *replaceUndef(CodeGenModule &CGM, IsPattern isPattern,
 void CodeGenFunction::EmitAutoVarDecl(const VarDecl &D) {
   AutoVarEmission emission = EmitAutoVarAlloca(D);
   EmitAutoVarInit(emission);
-  tryIntraObjectPoison(D.getType(), emission.getAllocatedAddress().getPointer());
+
+  // if it has initializer it has already poisoned
+  if (!D.hasInit() && !D.getType()->getAs<PointerType>())
+    tryIntraObjectPoisonOrUnpoison(D.getType(), emission.getAllocatedAddress().getPointer(), /*AssignLHS*/ false, true, D.getName().data(), "EmitAutoVarDecl");
+
   EmitAutoVarCleanups(emission);
 }
 

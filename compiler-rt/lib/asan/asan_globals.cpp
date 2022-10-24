@@ -60,6 +60,20 @@ ALWAYS_INLINE void PoisonShadowForGlobal(const Global *g, u8 value) {
   FastPoisonShadow(g->beg, g->size_with_redzone, value);
 }
 
+ALWAYS_INLINE void PoisonIntraObjectRedzones(uptr start, struct __asan_intra_object_redzones* intraObjectRedzones) {
+
+  u16 n_redzones = intraObjectRedzones->n_redzones;
+  for(u16 i = 0; i < n_redzones; i++) {
+    u16 offset, size;
+
+    offset = intraObjectRedzones->redzones[i].offset;
+    size = intraObjectRedzones->redzones[i].size;
+
+    uptr addr = start + offset;
+    AsanPoisonOrUnpoisonIntraObjectRedzone(addr, (uptr)size, /* poison */ true);
+  }
+}
+
 ALWAYS_INLINE void PoisonRedZones(const Global &g) {
   Printf("PoisonRedZones: %s\n", g.name);
   uptr aligned_size = RoundUpTo(g.size, ASAN_SHADOW_GRANULARITY);
@@ -72,30 +86,8 @@ ALWAYS_INLINE void PoisonRedZones(const Global &g) {
         kAsanGlobalRedzoneMagic);
   }
 
-  struct y {
-    u16 offset;
-    u16 size;
-  };
-
-  struct x {
-    u16 n;
-    struct y array[];
-  };
-
-  // intra object poison
-  if (g.offsetsize) {
-
-    struct x* info = (struct x*)g.offsetsize;
-    u16 n = info->n;
-    for(u16 i = 0; i < n; i++) {
-      u16 Offset, PoisonSize;
-  
-      Offset = info->array[i].offset;
-      PoisonSize = info->array[i].size;
-
-      uptr addr = g.beg + Offset;
-      AsanPoisonOrUnpoisonIntraObjectRedzone(addr, (uptr)PoisonSize, true);
-    }
+  if (g.intraObjectRedzones) {
+    PoisonIntraObjectRedzones(g.beg, g.intraObjectRedzones);
   }
 }
 
@@ -229,7 +221,7 @@ static void RegisterGlobal(const Global *g) {
     ReportGlobal(*g, "Added");
   CHECK(flags()->report_globals);
   CHECK(AddrIsInMem(g->beg));
-  CHECK(AddrIsInMem((uptr)(g->offsetsize)));
+  CHECK(AddrIsInMem((uptr)(g->intraObjectRedzones)));
   // TODO should do CHECK also on the array?
   if (!AddrIsAlignedByGranularity(g->beg)) {
     Report("The following global variable is not properly aligned.\n");

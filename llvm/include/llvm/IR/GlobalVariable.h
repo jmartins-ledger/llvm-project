@@ -39,14 +39,9 @@ class DIGlobalVariableExpression;
 class GlobalVariable : public GlobalObject, public ilist_node<GlobalVariable> {
   friend class SymbolTableListTraits<GlobalVariable>;
 
-  struct IntraObject {
-    uint16_t offset;
-    uint16_t size;
-  };
-
 
   AttributeSet Attrs;
-  SmallVector<struct IntraObject> ASanIntraObject;
+  SmallVector<std::pair<uint16_t, uint16_t>>* ASanIntraObject = nullptr;
   bool isIntraObjectInstrumentationAppliable: 1;              // Should ASan apply intra-object overflow detection mechanisms?
   bool isConstantGlobal : 1;                   // Is this a global constant?
   bool isExternallyInitializedConstant : 1;    // Is this a global whose value
@@ -254,24 +249,23 @@ public:
     return isIntraObjectInstrumentationAppliable;
   }
 
-  void setASanIntraObjectInfo(SmallVector<struct IntraObject> intraObject) {
+  void setASanIntraObjectInfo(SmallVector<std::pair<uint16_t, uint16_t>>* intraObject) {
     ASanIntraObject = intraObject;
   }
 
-  SmallVector<struct IntraObject> getASanIntraObjectInfo() const {
+  SmallVector<std::pair<uint16_t, uint16_t>>* getASanIntraObjectInfo() const {
     return ASanIntraObject;
   }
 
   void addASanIntraObjectInfo(uint16_t offset, uint16_t size) {
-    ASanIntraObject.push_back({offset, size});
-  }
+    if (!isIntraObjectInstrumentationAppliable) 
+      return;
 
-  size_t getASanIntraObjectSize() const {
-    return ASanIntraObject.size();
-  }
+    if (!ASanIntraObject) {
+      ASanIntraObject = new SmallVector<std::pair<uint16_t, uint16_t>>();
+    }
 
-  std::pair<uint16_t, uint16_t> get_i_ASanIntraObjectInfo(unsigned index) {
-    return std::make_pair(ASanIntraObject[index].offset, ASanIntraObject[index].size);
+    ASanIntraObject->push_back({offset, size});
   }
 
   /// Check if section name is present

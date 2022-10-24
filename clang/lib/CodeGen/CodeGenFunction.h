@@ -4664,7 +4664,7 @@ public:
                                      const llvm::Twine &Name = "");
 
   /// Tries to poison the extra memory added between each field - ASan related
-  void tryIntraObjectPoison(const QualType T, llvm::Value* MemoryAddress);
+  void tryIntraObjectPoisonOrUnpoison(const QualType T, llvm::Value* MemoryAddress, bool AssignLHS, bool Poison, const char* varName, const char* prevFunc);
 
 private:
   llvm::MDNode *getRangeForLoadFromType(QualType Ty);

@@ -4179,7 +4179,7 @@ public:
 
   // Get the intra object redzones offset and size, in case its a record 
   // where we inserted extra padding between fields
-  void getRedzones(ASTContext &Context, SmallVector<std::pair<uint16_t, uint16_t>> *OffsetSize);
+  void getRedzones(ASTContext &Context, SmallVector<std::pair<uint16_t, uint16_t>> *OffsetSize, size_t displacement);
 
   /// Whether we are allowed to insert extra padding between fields.
   /// These padding are added to help AddressSanitizer detect

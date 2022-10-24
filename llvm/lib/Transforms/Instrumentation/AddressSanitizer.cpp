@@ -2342,7 +2342,14 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
                                                   NewGlobal->getIntraObjectInstrumentation() ? "true" : "false");
     if (NewGlobal->getIntraObjectInstrumentation()) {
 
-      size_t elemnts = G->getASanIntraObjectSize();
+      SmallVector<std::pair<uint16_t, uint16_t>>* OffsetSizePoison = G->getASanIntraObjectInfo();
+
+      if (OffsetSizePoison == nullptr) {
+        puts("bad condition\n");
+        exit(1);
+      }
+      size_t elemnts = OffsetSizePoison->size();
+      assert(elemnts < 0xffff);
 
       printf("elemnts %ld\n", elemnts);
 
@@ -2353,23 +2360,15 @@ bool ModuleAddressSanitizer::InstrumentGlobals(IRBuilder<> &IRB, Module &M,
 
       SmallVector<Constant*> array_initializers(elemnts);
 
-      for (size_t x = 0; x < elemnts; x++) {
-        uint16_t Offset, PoisonSize;
-        std::pair<uint16_t, uint16_t> OffsetSize = NewGlobal->get_i_ASanIntraObjectInfo(x);
-
-        Offset = std::get<0>(OffsetSize);
-        PoisonSize = std::get<1>(OffsetSize); 
+      for (auto it : *OffsetSizePoison) {
+        uint16_t offset = std::get<0>(it);
+        uint16_t size = std::get<1>(it);
         Constant *OffsetSizeInitializer = ConstantStruct::get(offset_sizeTy, 
-                                              ConstantInt::get(Int16Ty, Offset),
-                                              ConstantInt::get(Int16Ty, PoisonSize));
+                                              ConstantInt::get(Int16Ty, offset),
+                                              ConstantInt::get(Int16Ty, size));
 
-        printf("%s\n", NewGlobal->getName().data());
-        printf("   offset       %d\n", Offset);
-        printf("   poison size %d\n", PoisonSize);
-        array_initializers[x] = OffsetSizeInitializer;
+        array_initializers.push_back(OffsetSizeInitializer);
       }
-
-      assert(elemnts < 0xffff);
 
       Constant* intraObjectInfoInitializer = ConstantStruct::get(intraObjectInfoTy,
                                             ConstantInt::get(Int16Ty, (uint16_t) elemnts),

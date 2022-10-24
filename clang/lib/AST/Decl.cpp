@@ -4775,7 +4775,7 @@ void RecordDecl::LoadFieldsFromExternalStorage() const {
                                                  /*FieldsAlreadyLoaded=*/false);
 }
 
-void RecordDecl::getRedzones(ASTContext &Context, SmallVector<std::pair<uint16_t, uint16_t>> *OffsetSize) {
+void RecordDecl::getRedzones(ASTContext &Context, SmallVector<std::pair<uint16_t, uint16_t>> *OffsetSize, size_t displacement) {
     
     struct SizeAndOffset {
       uint64_t Size;
@@ -4797,10 +4797,31 @@ void RecordDecl::getRedzones(ASTContext &Context, SmallVector<std::pair<uint16_t
       CharUnits FieldSize = FieldInfo.Width;
       assert(NumFields < SSV.size());
       SSV[NumFields].Size = D->isBitField() ? 0 : FieldSize.getQuantity();
+
+      if (D->getType()->isRecordType()) {
+        auto* RT_FIELD = D->getType()->getAs<RecordType>();
+        if (RT_FIELD) {
+          RecordDecl* RD_FIELD = RT_FIELD->getDecl();
+
+          if (!RD_FIELD) {
+            puts("THIS IS A WEIRD CASE");
+            exit(1);
+          }
+
+          if (RD_FIELD->mayInsertExtraPadding()) {
+            RD_FIELD->getRedzones(Context, OffsetSize, displacement + SSV[NumFields].Offset);
+          }
+        }
+      }
       NumFields++;
     }
     assert(NumFields == SSV.size());
-    if (SSV.size() <= 1) return;
+    // VLA in structs have size 0. We still want to poison structs like the following:
+    // struct {
+    //   int len;
+    //   int array[];
+    // }
+    if (SSV.size() == 0) return;
 
     uint64_t TypeSize = Info.getDataSize().getQuantity();
     // For each field check if it has sufficient padding,
@@ -4816,8 +4837,12 @@ void RecordDecl::getRedzones(ASTContext &Context, SmallVector<std::pair<uint16_t
 
       assert(EndOffset <= 0xffff);
       assert(PoisonSize <= 0xffff);
-      
-      OffsetSize->push_back(std::make_pair((uint16_t)EndOffset, (uint16_t)PoisonSize));
+      assert(displacement <= 0xffff);
+      assert(EndOffset + displacement <= 0xffff);
+
+      printf("getRedzones: offset: 0x%x displacement: 0x%x with size 0x%x\n", 
+        (uint16_t)EndOffset, (uint16_t)displacement, (uint16_t)PoisonSize);
+      OffsetSize->push_back(std::make_pair((uint16_t)(EndOffset + displacement), (uint16_t)PoisonSize));
     }
 }
 
@@ -4832,14 +4857,15 @@ bool RecordDecl::mayInsertExtraPadding(bool EmitRemark) const {
   const auto *CXXRD = dyn_cast<CXXRecordDecl>(this);
   const auto *RD = dyn_cast<RecordDecl>(this);
 
-  printf("mayInsertExtraPadding: declaration of %s\n", getQualifiedNameAsString().c_str());
-
   if (RD) {
+    printf("RecordDecl %s\n", RD->getName().data());
     printf("\thasFlexibleArrayMember   %s\n", RD->hasFlexibleArrayMember() ? "yes" : "no");
     printf("\tisAnonymousStructOrUnion %s\n", RD->isAnonymousStructOrUnion() ? "yes" : "no");
     printf("\tisRandomized %s\n", RD->isRandomized() ? "yes" : "no");
+    printf("\tisUnion %s\n", RD->isUnion() ? "yes" : "no");
     printf("\tisOrContainsUnion %s\n", RD->isOrContainsUnion() ? "yes" : "no");
-    return !(RD->hasFlexibleArrayMember() || RD->isRandomized() || RD->isOrContainsUnion() || RD->isAnonymousStructOrUnion());
+
+    return !RD->isUnion();
   }
   
   // We may be able to relax some of these requirements.

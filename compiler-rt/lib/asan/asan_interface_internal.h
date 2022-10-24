@@ -44,14 +44,14 @@ extern "C" {
     int column_no;
   };
 
-  struct y {
+  struct __asan_intra_object_redzone {
     __asan::u16 offset;
     __asan::u16 size;
   };
 
-  struct x {
-    __asan::u16 n;
-    struct y* array;
+  struct __asan_intra_object_redzones {
+    __asan::u16 n_redzones;
+    struct __asan_intra_object_redzone redzones[];
   };
 
   // This structure describes an instrumented global variable.
@@ -68,7 +68,7 @@ extern "C" {
                              // linker happy...
     uptr odr_indicator;      // The address of the ODR indicator symbol.
 
-    struct x* offsetsize;
+    struct __asan_intra_object_redzones* intraObjectRedzones;
   };
 
   // These functions can be called on some platforms to find globals in the same

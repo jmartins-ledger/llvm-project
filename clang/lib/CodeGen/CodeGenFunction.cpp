@@ -2787,8 +2787,13 @@ llvm::Value *CodeGenFunction::emitBoolVecConversion(llvm::Value *SrcVec,
   return Builder.CreateShuffleVector(SrcVec, ShuffleMask, Name);
 }
 
-void CodeGenFunction::tryIntraObjectPoison(const QualType T, llvm::Value* MemoryAddress) {
-    // if its a pointer get the derefenrece otherwise work with the original type T
+void CodeGenFunction::tryIntraObjectPoisonOrUnpoison(const QualType T, llvm::Value* MemoryAddress, bool AssignLHS, bool Poison, const char* varName, const char* prevFunc) {
+
+    // NULL memory address known at compile time, eg: x = NULL, should also check that if its a pointer ...
+    if (dyn_cast<llvm::ConstantPointerNull>(MemoryAddress)) {
+      return;
+    }
+
     const auto* PtrT = T->getAs<PointerType>();
     const auto NewT = PtrT ? PtrT->getPointeeType() : T;
 
@@ -2799,18 +2804,35 @@ void CodeGenFunction::tryIntraObjectPoison(const QualType T, llvm::Value* Memory
 
       if (RD->mayInsertExtraPadding()) {
 
+        printf("CodeGenFunction::tryIntraObject(%s) %s --> %s\n", Poison ? "Poison" : "Unpoison", prevFunc, varName);
         ASTContext &Context = getContext();
 
         unsigned PtrSize = CGM.getDataLayout().getPointerSizeInBits();
 
-        SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
-        RD->getRedzones(Context, &OffsetSize);
+        if (!PtrT && AssignLHS) {
+          #define RED   "\x1B[31m"
+          #define RESET "\x1B[0m"
+          printf(RED "[!] What are the situations where this can happen\n" RESET);
+        }
 
-        // Insert call to __asan_poison_intra_object_redzone run-time functions.
+        if (PtrT && AssignLHS) {
+          // create load instruction
+          Address addr (MemoryAddress, Builder.getPtrTy(), getPointerAlign());
+          auto *LD = Builder.CreateLoad(addr, "loaded_address");
+          MemoryAddress = Builder.CreatePtrToInt(LD, IntPtrTy);
+        }
+
+        SmallVector<std::pair<uint16_t, uint16_t>> OffsetSize;
+        RD->getRedzones(Context, &OffsetSize, /* displacement */ 0);
+
+        // Insert call to __asan_poison_intra_object_redzone/__asan_unpoison_intra_object_redzone run-time functions.
         // LLVM AddressSanitizer pass may decide to inline them later.
         llvm::Type *Args[2] = {IntPtrTy, IntPtrTy};
         llvm::FunctionType *FTy = llvm::FunctionType::get(VoidTy, Args, false);
-        llvm::FunctionCallee F = CGM.CreateRuntimeFunction(FTy, "__asan_poison_intra_object_redzone");
+
+        llvm::FunctionCallee F = CGM.CreateRuntimeFunction(FTy, 
+                                Poison ? "__asan_poison_intra_object_redzone" :
+                                         "__asan_unpoison_intra_object_redzone");
 
         llvm::Value* StartStructAddr;
         StartStructAddr = Builder.CreatePtrToInt(MemoryAddress, IntPtrTy);
@@ -2824,6 +2846,12 @@ void CodeGenFunction::tryIntraObjectPoison(const QualType T, llvm::Value* Memory
               F, {Builder.CreateAdd(StartStructAddr, Builder.getIntN(PtrSize, Offset)),
                   Builder.getIntN(PtrSize, PoisonSize)});
         }
+
+
+        // FOR DEBUG PURPOSES ONLY
+        FTy = llvm::FunctionType::get(VoidTy, {IntPtrTy}, false);
+        F = CGM.CreateRuntimeFunction(FTy, "__asan_debug_shadow");
+        Builder.CreateCall(F, {StartStructAddr});
       }
     }
 }
