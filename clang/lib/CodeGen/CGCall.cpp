@@ -4722,6 +4722,8 @@ RValue CodeGenFunction::EmitCall(const CGFunctionInfo &CallInfo,
 
   assert(Callee.isOrdinary() || Callee.isVirtual());
 
+  // printf("CodeGenFunction::EmitCall %ld\n", CallArgs.size());
+
   // Handle struct-return functions by passing a pointer to the
   // location that we would like to return into.
   QualType RetTy = CallInfo.getReturnType();

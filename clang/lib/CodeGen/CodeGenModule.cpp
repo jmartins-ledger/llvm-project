@@ -3305,6 +3305,7 @@ namespace {
         : Name(N), BI(C) {}
 
     bool VisitCallExpr(const CallExpr *E) {
+      printf("VisitCallExpr\n");
       const FunctionDecl *FD = E->getDirectCallee();
       if (!FD)
         return false;

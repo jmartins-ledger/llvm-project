@@ -2790,9 +2790,9 @@ llvm::Value *CodeGenFunction::emitBoolVecConversion(llvm::Value *SrcVec,
 void CodeGenFunction::tryIntraObjectPoisonOrUnpoison(const QualType T, llvm::Value* MemoryAddress, bool AssignLHS, bool Poison, const char* varName, const char* prevFunc) {
 
     // NULL memory address known at compile time, eg: x = NULL, should also check that if its a pointer ...
-    if (dyn_cast<llvm::ConstantPointerNull>(MemoryAddress)) {
-      return;
-    }
+    // if (dyn_cast<llvm::ConstantPointerNull>(MemoryAddress)) {
+    //   return;
+    // }
 
     const auto* PtrT = T->getAs<PointerType>();
     const auto NewT = PtrT ? PtrT->getPointeeType() : T;

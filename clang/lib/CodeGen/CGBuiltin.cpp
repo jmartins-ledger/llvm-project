@@ -2167,6 +2167,90 @@ static unsigned mutateLongDoubleBuiltin(unsigned BuiltinID) {
   }
 }
 
+void CodeGenFunction::EmitMemsetWithRedzones(RecordDecl* RD, Address Start, 
+                           llvm::Value* ByteVal, llvm::Value* SizeVal) {
+
+        // Set everything but redzones
+        SmallVector<std::pair<uint16_t, uint16_t>> Redzones;
+        RD->getRedzones(getContext(), &Redzones, /* displacement */ 0);
+
+        unsigned PtrSize = CGM.getDataLayout().getPointerSizeInBits();
+
+        uint16_t offset = 0;
+        uint16_t total_size = 0;
+        for (size_t i = 0; i < Redzones.size(); i++) {
+          uint16_t redzoneOffset = std::get<0>(Redzones[i]);
+          uint16_t redzoneSize = std::get<1>(Redzones[i]);
+
+          uint16_t size = redzoneOffset - offset;
+          total_size += size;
+
+          // This is due to having a consecutive redzones due to the end of a structure inside another
+          // this is a quick fix for the moment
+          // TODO after removing poison at the end of a structure, this quick fix should not be necessary
+          if (size != 0) {
+            BasicBlock* MemsetBlock = createBasicBlock("memset", this->CurFn);
+            BasicBlock* NextBlock = createBasicBlock("nextblock", this->CurFn);
+
+
+            Value* x = Builder.CreateICmpSGT(
+              Builder.getIntN(PtrSize, total_size),
+              SizeVal
+            );
+            
+            Builder.CreateCondBr(x, NextBlock, MemsetBlock);
+
+            // MemsetBlock
+            Builder.SetInsertPoint(MemsetBlock);
+            Value* OffsetVal = Builder.getIntN(PtrSize, offset);
+            Value* DestVal = Builder.CreateAdd(
+              Builder.CreatePtrToInt(Start.getPointer(), IntPtrTy), 
+              OffsetVal
+            );
+
+            Address Dest = Address(DestVal, Start.getElementType(), Start.getAlignment());
+
+            Builder.CreateMemSet(Dest, ByteVal, Builder.getIntN(PtrSize, size), false);
+            Builder.CreateBr(NextBlock);
+
+            Builder.SetInsertPoint(NextBlock);
+          }
+          offset = redzoneOffset + redzoneSize;
+        }
+
+        // Fill rest of the memory, this is likely a oob vulnerability
+        BasicBlock* MemsetBlock = createBasicBlock("memset", this->CurFn);
+        BasicBlock* NextBlock = createBasicBlock("nextblock", this->CurFn);
+
+        Value* isLessOrEqualToZero = Builder.CreateICmpSLE(
+          SizeVal,
+          Builder.getIntN(PtrSize, total_size)
+        );
+
+        Builder.CreateCondBr(isLessOrEqualToZero, NextBlock, MemsetBlock);
+
+        // MemsetBlock
+        Builder.SetInsertPoint(MemsetBlock);
+
+        Value* RemainingSizeVal = Builder.CreateSub(
+          SizeVal,
+          Builder.getIntN(PtrSize, total_size)
+        );
+
+        Value* OffsetVal = Builder.getIntN(PtrSize, offset);
+        Value* DestVal = Builder.CreateAdd(
+          Builder.CreatePtrToInt(Start.getPointer(), IntPtrTy), 
+          OffsetVal
+        );
+
+        Address Dest = Address(DestVal, Start.getElementType(), Start.getAlignment());
+
+        Builder.CreateMemSet(Dest, ByteVal, RemainingSizeVal, false);
+        Builder.CreateBr(NextBlock);
+
+        Builder.SetInsertPoint(NextBlock);
+}
+
 RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
                                         const CallExpr *E,
                                         ReturnValueSlot ReturnValue) {
@@ -3425,6 +3509,29 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
                         E->getArg(0)->getExprLoc(), FD, 0);
     EmitNonNullArgCheck(RValue::get(Src.getPointer()), E->getArg(1)->getType(),
                         E->getArg(1)->getExprLoc(), FD, 1);
+
+
+
+    const QualType DestT = E->getArg(0)->IgnoreCasts()->getType();
+    const QualType SrcT = E->getArg(1)->IgnoreCasts()->getType();
+
+    const auto* DestPtrT = DestT->getAs<PointerType>();
+    const auto* SrcPtrT = SrcT->getAs<PointerType>();
+    // const auto* PtrT = T->getAs<PointerType>();
+    // if (PtrT) {
+    //   const auto NewT = PtrT->getPointeeType();
+    //   const auto* RT = NewT->getAs<RecordType>();
+
+    //   if (RT) {
+    //     RecordDecl* RD = RT->getDecl();
+
+    //     if (RD->mayInsertExtraPadding()) {
+    //       EmitMemsetWithRedzones(RD, Dest, ByteVal, SizeVal);
+    //       return RValue::get(Dest.getPointer());
+    //     }
+    //   }
+    // } 
+
     Builder.CreateMemCpy(Dest, Src, SizeVal, false);
     if (BuiltinID == Builtin::BImempcpy ||
         BuiltinID == Builtin::BI__builtin_mempcpy)
@@ -3514,10 +3621,31 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     Value *SizeVal = EmitScalarExpr(E->getArg(2));
     EmitNonNullArgCheck(RValue::get(Dest.getPointer()), E->getArg(0)->getType(),
                         E->getArg(0)->getExprLoc(), FD, 0);
+
+    // TODO check if we have asan-padding field activated
+
+    // this needs to be reviewed is IgnoreCasts really what we want? (there are other variants)
+    const QualType T = E->getArg(0)->IgnoreCasts()->getType();
+    const auto* PtrT = T->getAs<PointerType>();
+
+    if (PtrT) {
+      const auto NewT = PtrT->getPointeeType();
+      const auto* RT = NewT->getAs<RecordType>();
+
+      if (RT) {
+        RecordDecl* RD = RT->getDecl();
+
+        if (RD->mayInsertExtraPadding()) {
+          EmitMemsetWithRedzones(RD, Dest, ByteVal, SizeVal);
+          return RValue::get(Dest.getPointer());
+        }
+      }
+    } 
     Builder.CreateMemSet(Dest, ByteVal, SizeVal, false);
     return RValue::get(Dest.getPointer());
   }
   case Builtin::BI__builtin_memset_inline: {
+    printf("memset2\n");
     Address Dest = EmitPointerWithAlignment(E->getArg(0));
     Value *ByteVal =
         Builder.CreateTrunc(EmitScalarExpr(E->getArg(1)), Builder.getInt8Ty());
@@ -3529,6 +3657,7 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     return RValue::get(nullptr);
   }
   case Builtin::BI__builtin___memset_chk: {
+    printf("memset3\n");
     // fold __builtin_memset_chk(x, y, cst1, cst2) to memset iff cst1<=cst2.
     Expr::EvalResult SizeResult, DstSizeResult;
     if (!E->getArg(2)->EvaluateAsInt(SizeResult, CGM.getContext()) ||

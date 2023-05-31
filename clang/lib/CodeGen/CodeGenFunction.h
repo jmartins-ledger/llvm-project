@@ -4122,6 +4122,9 @@ public:
   RValue EmitAMDGPUDevicePrintfCallExpr(const CallExpr *E);
   RValue EmitOpenMPDevicePrintfCallExpr(const CallExpr *E);
 
+  void EmitMemsetWithRedzones(RecordDecl* RD, Address Start, 
+                             llvm::Value* ByteVal, llvm::Value* SizeVal);
+
   RValue EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
                          const CallExpr *E, ReturnValueSlot ReturnValue);
 

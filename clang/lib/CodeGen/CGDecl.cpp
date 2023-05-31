@@ -781,7 +781,9 @@ void CodeGenFunction::EmitScalarInit(const Expr *init, const ValueDecl *D,
     llvm::Value *value = EmitScalarExpr(init);
 
     // its a variable declaration no need to unpoison LHS
-    // tryIntraObjectPoisonOrUnpoison(D->getType(), value, /*AssignLHS*/ false, true, D->getName().data(), "EmitScalarInit");
+    if (D) {
+      tryIntraObjectPoisonOrUnpoison(D->getType(), value, /*AssignLHS*/ false, true, D->getName().data(), "EmitScalarInit");
+    }
 
     if (capturedByInit)
       drillIntoBlockVariable(*this, lvalue, cast<VarDecl>(D));

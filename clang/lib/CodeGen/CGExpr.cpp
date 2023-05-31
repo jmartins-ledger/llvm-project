@@ -5001,6 +5001,9 @@ RValue CodeGenFunction::EmitRValueForField(LValue LV,
 
 RValue CodeGenFunction::EmitCallExpr(const CallExpr *E,
                                      ReturnValueSlot ReturnValue) {
+
+  // printf("CodeGenFunction::EmitCallExpr %s\n", E->getDirectCallee()->getName().data());
+
   // Builtins never have block type.
   if (E->getCallee()->getType()->isBlockPointerType())
     return EmitBlockCallExpr(E, ReturnValue);
@@ -5019,6 +5022,7 @@ RValue CodeGenFunction::EmitCallExpr(const CallExpr *E,
   CGCallee callee = EmitCallee(E->getCallee());
 
   if (callee.isBuiltin()) {
+    printf("callee.isBuiltin() %s\n", E->getDirectCallee()->getName().data());
     return EmitBuiltinExpr(callee.getBuiltinDecl(), callee.getBuiltinID(),
                            E, ReturnValue);
   }
@@ -5049,6 +5053,7 @@ static bool OnlyHasInlineBuiltinDeclaration(const FunctionDecl *FD) {
 
 static CGCallee EmitDirectCallee(CodeGenFunction &CGF, GlobalDecl GD) {
   const FunctionDecl *FD = cast<FunctionDecl>(GD.getDecl());
+  // printf("EmitDirectCallee %s\n", CGF.CurFn->getName().data());
 
   if (auto builtinID = FD->getBuiltinID()) {
     std::string NoBuiltinFD = ("no-builtin-" + FD->getName()).str();
@@ -5099,6 +5104,9 @@ static CGCallee EmitDirectCallee(CodeGenFunction &CGF, GlobalDecl GD) {
 
 CGCallee CodeGenFunction::EmitCallee(const Expr *E) {
   E = E->IgnoreParens();
+
+  auto* callexpr = dyn_cast_or_null<CallExpr>(E);
+  // printf("CodeGenFunction::EmitCallee `%s`\n", callexpr ? callexpr->getDirectCallee()->getName().data() : "");
 
   // Look through function-to-pointer decay.
   if (auto ICE = dyn_cast<ImplicitCastExpr>(E)) {
@@ -5320,6 +5328,7 @@ LValue CodeGenFunction::EmitStmtExprLValue(const StmtExpr *E) {
 RValue CodeGenFunction::EmitCall(QualType CalleeType, const CGCallee &OrigCallee,
                                  const CallExpr *E, ReturnValueSlot ReturnValue,
                                  llvm::Value *Chain) {
+  // printf("CodeGenFunction::EmitCall %s\n", E->getDirectCallee()->getName().data());
   // Get the actual function type. The callee type will always be a pointer to
   // function type or a block pointer type.
   assert(CalleeType->isFunctionPointerType() &&

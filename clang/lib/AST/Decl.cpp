@@ -4858,12 +4858,12 @@ bool RecordDecl::mayInsertExtraPadding(bool EmitRemark) const {
   const auto *RD = dyn_cast<RecordDecl>(this);
 
   if (RD) {
-    printf("RecordDecl %s\n", RD->getName().data());
-    printf("\thasFlexibleArrayMember   %s\n", RD->hasFlexibleArrayMember() ? "yes" : "no");
-    printf("\tisAnonymousStructOrUnion %s\n", RD->isAnonymousStructOrUnion() ? "yes" : "no");
-    printf("\tisRandomized %s\n", RD->isRandomized() ? "yes" : "no");
-    printf("\tisUnion %s\n", RD->isUnion() ? "yes" : "no");
-    printf("\tisOrContainsUnion %s\n", RD->isOrContainsUnion() ? "yes" : "no");
+    printf("RecordDecl %s %s padding\n", RD->getName().data(), !RD->isUnion() ? "has extra" : "does not have extra");
+    // printf("\thasFlexibleArrayMember   %s\n", RD->hasFlexibleArrayMember() ? "yes" : "no");
+    // printf("\tisAnonymousStructOrUnion %s\n", RD->isAnonymousStructOrUnion() ? "yes" : "no");
+    // printf("\tisRandomized %s\n", RD->isRandomized() ? "yes" : "no");
+    // printf("\tisUnion %s\n", RD->isUnion() ? "yes" : "no");
+    // printf("\tisOrContainsUnion %s\n", RD->isOrContainsUnion() ? "yes" : "no");
 
     return !RD->isUnion();
   }

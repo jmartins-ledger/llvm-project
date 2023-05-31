@@ -119,6 +119,8 @@ void hexdump(u8* addr) {
   u8* end   = addr + 5 * bytes_line;
   for (; start < end; start += bytes_line)
     print_line(start, bytes_line);
+  
+  Printf("\n");
 }
 
 
@@ -519,6 +521,11 @@ int __sanitizer_verify_contiguous_container(const void *beg_p,
                                             const void *end_p) {
   return __sanitizer_contiguous_container_find_bad_address(beg_p, mid_p,
                                                            end_p) == nullptr;
+}
+
+extern "C" SANITIZER_INTERFACE_ATTRIBUTE
+void __asan_debug_value(uptr ptr) {
+  Printf("__asan_debug_args: 0x%x\n", ptr);
 }
 
 extern "C" SANITIZER_INTERFACE_ATTRIBUTE
